@@ -1,0 +1,19 @@
+# Planejamento e dados pessoais (mapa, tickets, pesquisas): só local
+.scratch/
+
+# Segredos (token do Instagram/Meta)
+.env
+.env.*
+!.env.example
+
+# Dados coletados da conta
+data/
+*.sqlite
+*.db
+*.csv
+
+# Config e worktrees locais do Claude Code
+.claude/
+CLAUDE.local.md
+
+__pycache__/
