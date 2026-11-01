@@ -20,3 +20,9 @@ CLAUDE.local.md
 __pycache__/
 .venv/
 .pytest_cache/
+
+# Estado da skill de design (rotação entre builds)
+.hallmark/
+
+# Protótipos de design (não versionar)
+design/
