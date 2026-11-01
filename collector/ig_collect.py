@@ -45,7 +45,7 @@ MEDIA_METRICS = {
     "FEED": ["reach", "views", "likes", "comments", "shares", "saved",
              "total_interactions", "follows", "profile_visits"],
     "REELS": ["reach", "views", "likes", "comments", "shares", "saved",
-              "total_interactions", "ig_reels_avg_watch_time"],
+              "total_interactions", "ig_reels_avg_watch_time", "reels_skip_rate"],
     "STORY": ["reach", "views", "replies", "shares", "follows", "profile_visits",
               "navigation"],
 }
@@ -239,6 +239,31 @@ def collect_account_insights(db, client, ig_id, account_id, days=REPROCESS_DAYS)
             log(db, "warn", f"conta {d} {metric}: {err}", account_id)
 
 
+def collect_follower_series(db, client, ig_id, account_id, days=REPROCESS_DAYS + 2):
+    """Novos seguidores por dia (follower_count), gravados como métrica da conta.
+
+    A API devolve um histórico longo (~450 dias), em blocos de até 30 dias. O dia vem marcado
+    pelo seu fim em UTC (07:00), então a data do dado é a do `end_time` menos um dia."""
+    end, remaining = datetime.now(TZ).date(), days
+    while remaining > 0:
+        span = min(remaining, 30)
+        start = end - timedelta(days=span - 1)
+        since, until = day_bounds(start)[0], day_bounds(end + timedelta(days=1))[1]
+        try:
+            data = client.get(f"{ig_id}/insights", metric="follower_count", period="day",
+                              since=since, until=until)
+        except ApiError as e:
+            log(db, "warn", f"seguidores por dia {start} a {end}: {e}", account_id)
+            return
+        for item in data.get("data", []):
+            for v in item.get("values", []):
+                d = date.fromisoformat(v["end_time"][:10]) - timedelta(days=1)
+                db.execute("INSERT OR REPLACE INTO account_insights (account_id, date, metric, value, "
+                           "collected_at) VALUES (?, ?, 'follower_count', ?, ?)",
+                           (account_id, d.isoformat(), v.get("value") or 0, now_iso()))
+        end, remaining = start - timedelta(days=1), remaining - span
+
+
 def media_kind(m):
     if m.get("media_product_type") == "STORY":
         return "STORY"
@@ -317,6 +342,8 @@ def main():
     ap.add_argument("--demographics", action="store_true", help="força coleta de demografia")
     ap.add_argument("--all-media", action="store_true",
                     help=f"atualiza insights de todas as mídias, não só dos últimos {MEDIA_REFRESH_DAYS} dias")
+    ap.add_argument("--backfill-followers", type=int, default=0, metavar="DIAS",
+                    help="busca o histórico de novos seguidores por dia dos últimos DIAS (a API guarda ~450)")
     ap.add_argument("--refresh-token", action="store_true", help="força renovação do token")
     ap.add_argument("--days", type=int, default=REPROCESS_DAYS,
                     help=f"dias de insights da conta a (re)processar (padrão {REPROCESS_DAYS}, máx. ~30)")
@@ -340,6 +367,7 @@ def main():
         ig_id = me.get("user_id") or me["id"]
         maybe_refresh_token(db, client, account_id, force=args.refresh_token)
         collect_account_insights(db, client, ig_id, account_id, days=args.days)
+        collect_follower_series(db, client, ig_id, account_id, days=args.backfill_followers or REPROCESS_DAYS + 2)
         collect_media(db, client, account_id, all_media=args.all_media)
         if args.demographics or date.today().weekday() == 0:  # segunda-feira
             collect_demographics(db, client, ig_id, account_id)

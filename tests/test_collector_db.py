@@ -75,3 +75,38 @@ def test_collecting_again_updates_posts_in_place_with_enforcement_on(tmp_path):
              for t in ("media", "media_insights", "transcripts", "account_insights")}
     assert after == before
     assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+class SeriesClient(FakeClient):
+    """Responde follower_count por bloco e conta as chamadas."""
+
+    def __init__(self):
+        super().__init__("111", "conta_a", 100)
+        self.calls = []
+
+    def get(self, path, **params):
+        if params.get("metric") == "follower_count":
+            self.calls.append((params["since"], params["until"]))
+            return {"data": [{"name": "follower_count", "values": [
+                {"value": 3, "end_time": "2026-10-30T07:00:00+0000"},
+                {"value": 0, "end_time": "2026-10-31T07:00:00+0000"}]}]}
+        return self.me
+
+
+def test_follower_series_is_stored_per_day_with_the_utc_end_time_shifted_back_one_day(tmp_path):
+    db = appdb.connect(tmp_path / "x.sqlite")
+    account = appdb.ensure_account(db, "111")
+    ig_collect.collect_follower_series(db, SeriesClient(), "111", account, days=5)
+    ig_collect.collect_follower_series(db, SeriesClient(), "111", account, days=5)  # de novo: sem duplicar
+    rows = dict(db.execute("SELECT date, value FROM account_insights WHERE metric = 'follower_count'"))
+    assert rows == {"2026-10-29": 3, "2026-10-30": 0}
+
+
+def test_long_backfills_are_split_into_blocks_of_at_most_30_days(tmp_path):
+    db = appdb.connect(tmp_path / "x.sqlite")
+    account = appdb.ensure_account(db, "111")
+    client = SeriesClient()
+    ig_collect.collect_follower_series(db, client, "111", account, days=65)
+    assert len(client.calls) == 3  # 30 + 30 + 5
+    spans = [(until - since) / 86400 for since, until in client.calls]
+    assert max(spans) <= 31

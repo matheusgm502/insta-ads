@@ -72,6 +72,17 @@ def candidates(posts, days=365, top=8, kinds=("REELS",), now=None):
     return ranked[:top], [p for p in posts if p.outlier and p.kind in kinds]
 
 
+def _retention(p):
+    skip = p.metrics.get("reels_skip_rate")
+    return f"{skip:.0f}%" if skip is not None else "–"
+
+
+def _watched(p):
+    """Parte do vídeo assistida em média (tempo médio assistido / duração), quando se sabe as duas."""
+    avg = p.metrics.get("ig_reels_avg_watch_time")
+    return f"{min(100, 100 * avg / 1000 / p.duration):.0f}%" if avg and p.duration else "–"
+
+
 def _short(text, n=70):
     text = " ".join((text or "(sem texto)").split())
     return text[:n] + ("…" if len(text) > n else "")
@@ -81,14 +92,18 @@ def render(ranked, outliers, days):
     L = ["# Candidatos a impulsionamento", "",
          f"Gerado em {datetime.now(analysis.TZ):%d/%m/%Y %H:%M}. Posts dos últimos {days} dias, ordenados por uma nota que combina "
          "alcance e compartilhamentos em relação à mediana do tipo (1,0 = na mediana).", "",
+         "> **Seguidores, visitas ao perfil e cliques por Reel não existem na API do Instagram.** Para a meta de "
+         "seguidores, o que dá para ver por Reel é retenção: quanto pulou nos 3 primeiros segundos e quanto do vídeo "
+         "foi assistido. É um indício, não a medida da meta; a medida real vem dos anúncios depois que rodarem.", "",
          "> **A triagem é por palavra-chave e só prioriza a revisão.** Não substitui a leitura da própria profissional "
          "nem a conferência com o conselho, e a ausência de alerta não garante conformidade.", "",
-         "| # | Data | Nota | Alcance | Compart. | Gancho | Triagem | Post |", "|---:|---|---:|---:|---:|---|---|---|"]
+         "| # | Data | Nota | Alcance | Compart. | Pulou em 3 s | Assistiu | Gancho | Triagem | Post |",
+         "|---:|---|---:|---:|---:|---:|---:|---|---|---|"]
     for i, r in enumerate(ranked, 1):
         p = r["post"]
         status = "sem alertas" if not r["flags"] else "**revisar:** " + ", ".join(f["code"] for f in r["flags"])
         L.append(f"| {i} | {p.date:%d/%m/%Y} | {r['score']:.1f} | {p.ratios['reach']:.1f}x | {p.ratios.get('shares', 1):.1f}x | "
-                 f"{_short(p.hook or p.caption, 55)} | {status} | [abrir]({p.permalink}) |")
+                 f"{_retention(p)} | {_watched(p)} | {_short(p.hook or p.caption, 55)} | {status} | [abrir]({p.permalink}) |")
     detailed = [r for r in ranked if r["flags"]]
     if detailed:
         L += ["", "## Alertas da triagem", ""]

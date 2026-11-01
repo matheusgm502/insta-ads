@@ -138,3 +138,18 @@ def test_protected_audio_is_read_from_the_skipped_transcripts(tmp_path):
     db.commit(); db.close()
     flags = {p.id: p.audio_protected for p in analysis.load_posts(tmp_path / "x.sqlite")}
     assert flags == {"protegido": True, "livre": False, "foto": False}   # só Reels contam
+
+
+def test_report_shows_retention_columns_and_the_limits_of_the_api(tmp_path):
+    build_db(tmp_path / "x.sqlite")
+    db = appdb.connect(tmp_path / "x.sqlite")
+    db.execute("INSERT INTO media_insights VALUES ('alto', '2026-11-01', 'reels_skip_rate', 40)")
+    db.execute("INSERT INTO media_insights VALUES ('alto', '2026-11-01', 'ig_reels_avg_watch_time', 12000)")
+    db.execute("UPDATE transcripts SET duration = 30 WHERE media_id = 'alto'")
+    db.commit()
+    db.close()
+    ranked, outliers = bc.candidates(analysis.load_posts(tmp_path / "x.sqlite"), now=NOW)
+    text = bc.render(ranked, outliers, 365)
+    assert "Pulou em 3 s" in text and "não existem na API" in text
+    row = next(line for line in text.splitlines() if "Fala sem problemas" in line)
+    assert row.count("40%") == 2  # pulou 40%; assistiu 12 s de 30 s = 40%
