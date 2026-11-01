@@ -61,10 +61,12 @@ def visual_for(db, media_id, has_visual):
     if not st:
         return None
     frames = [{"t": t, "is_cut": bool(cut), "path": path,
-               "description": json.loads(desc) if desc else None}
-              for t, cut, path, desc in db.execute(
-                  "SELECT t, is_cut, path, description FROM visual_frames WHERE media_id = ? "
-                  "ORDER BY idx", (media_id,))]
+               "description": json.loads(desc) if desc else None,
+               "measures": {"brightness": b, "contrast": c, "saturation": s, "warmth": w,
+                            "palette": json.loads(pal) if pal else None}}
+              for t, cut, path, desc, b, c, s, w, pal in db.execute(
+                  "SELECT t, is_cut, path, description, brightness, contrast, saturation, warmth, palette "
+                  "FROM visual_frames WHERE media_id = ? ORDER BY idx", (media_id,))]
     return {"source": st[0], "duration": st[1], "n_frames": st[2], "n_cuts": st[3],
             "model": st[4], "frames": frames}
 

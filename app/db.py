@@ -184,7 +184,14 @@ def m001_multi_account(db):
                            f"(ex.: {problems[0]}). O banco não foi alterado.")
 
 
-MIGRATIONS = [m001_multi_account]   # posição i = versão i + 1
+def m002_frame_metrics(db):
+    """Medidas visuais de cada frame (calculadas, sem IA): ver app/aesthetics.py."""
+    for column, kind in (("brightness", "REAL"), ("contrast", "REAL"), ("saturation", "REAL"),
+                         ("warmth", "REAL"), ("palette", "TEXT")):
+        db.execute(f"ALTER TABLE visual_frames ADD COLUMN {column} {kind}")
+
+
+MIGRATIONS = [m001_multi_account, m002_frame_metrics]   # posição i = versão i + 1
 LATEST = len(MIGRATIONS)
 
 

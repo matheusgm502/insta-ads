@@ -116,6 +116,16 @@ def describe_image(jpeg_bytes):
 
 # --- frames -----------------------------------------------------------------
 
+def measure_or_none(jpeg):
+    """Medidas visuais do frame (brilho, contraste, saturação, calor, paleta) ou Nones se falhar."""
+    try:
+        from app import aesthetics
+        m = aesthetics.measure_jpeg(jpeg)
+        return m["brightness"], m["contrast"], m["saturation"], m["warmth"], json.dumps(m["palette"])
+    except Exception:
+        return None, None, None, None, None
+
+
 def to_jpeg(img):
     img = img.convert("RGB")
     img.thumbnail((FRAME_MAX_SIDE, FRAME_MAX_SIDE))
@@ -259,9 +269,13 @@ def main():
                 except Exception as e:
                     log(db, "warn", f"descrição {m['id']} frame {idx}: {e}")
                     desc = None
-                db.execute("INSERT INTO visual_frames VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                measures = measure_or_none(jpeg)
+                db.execute("INSERT INTO visual_frames (media_id, idx, t, source, is_cut, path, description, "
+                           "model, described_at, brightness, contrast, saturation, warmth, palette) "
+                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                            (m["id"], idx, t, source, int(is_cut), str(path.relative_to(ROOT)),
-                            json.dumps(desc, ensure_ascii=False) if desc else None, MODEL, now_iso()))
+                            json.dumps(desc, ensure_ascii=False) if desc else None, MODEL, now_iso(),
+                            *measures))
                 db.commit()
             n_cuts = sum(1 for _, c, _ in frames if c)
             db.execute("INSERT OR REPLACE INTO visual_status VALUES (?, ?, ?, ?, ?, ?, ?)",

@@ -1,4 +1,4 @@
-// Esquema do banco local (data/instagram.sqlite), versão 1, em DBML.
+// Esquema do banco local (data/instagram.sqlite), versão 2, em DBML.
 // Para ver o diagrama: cole este arquivo em https://dbdiagram.io/d (só o esquema, sem dados).
 //
 // Fonte da verdade: app/db.py (SCHEMA_V1 e migrações). A versão fica em PRAGMA user_version.
@@ -119,6 +119,11 @@ Table visual_frames {
   description text [note: 'JSON: cenário, iluminação, enquadramento, pessoas, ação, texto_na_tela, elementos_graficos, cores']
   model text
   described_at text
+  brightness real [note: '0 = escuro, 1 = claro (calculado, sem IA; app/aesthetics.py)']
+  contrast real [note: 'desvio padrão da luminância']
+  saturation real [note: '0 = apagado, 1 = vívido']
+  warmth real [note: '-1 frio a +1 quente']
+  palette text [note: 'JSON: cores dominantes {hex, nome, share}']
   indexes { (media_id, idx) [pk] }
 }
 

@@ -123,7 +123,8 @@ def test_screen_text_ignores_negative_descriptions(tmp_path):
         insert_media(db, pid, "REELS", ts)
         db.execute("INSERT INTO media_insights VALUES (?,'d','reach',10)", (pid,))
         db.execute("INSERT INTO visual_status VALUES (?,'video',30,1,0,'m',?)", (pid, ts))
-        db.execute("INSERT INTO visual_frames VALUES (?,0,0,'video',0,'p',?,'m',?)",
+        db.execute("INSERT INTO visual_frames (media_id, idx, t, source, is_cut, path, description, model, "
+                   "described_at) VALUES (?,0,0,'video',0,'p',?,'m',?)",
                    (pid, json.dumps({"texto_na_tela": text}), ts))
     db.commit()
     db.close()

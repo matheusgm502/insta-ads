@@ -1,5 +1,7 @@
-# Só para collector/transcribe.py (os outros scripts usam só a biblioteca padrão).
+# Para transcribe.py, describe.py e app/aesthetics.py (o restante usa só a biblioteca padrão).
 # Instalar: uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python -r collector/requirements.txt
 faster-whisper==1.2.1
 # PyAV 15+ removeu um argumento que o faster-whisper 1.2.1 usa.
 av>=14,<15
+pillow
+numpy
