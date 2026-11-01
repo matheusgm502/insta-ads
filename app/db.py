@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("APP_DB", ROOT / "data" / "instagram.sqlite"))
 DEFAULT_TZ = "America/Sao_Paulo"
+BUSY_TIMEOUT = 30  # segundos esperando outra gravação terminar, em vez de falhar na hora
 
 STATUSES = ("draft", "confirmed", "superseded")
 APPROVAL_ACTIONS = ("create_campaign", "activate_campaign", "increase_budget",
@@ -225,7 +226,7 @@ def connect(path=None, backup=True):
     """Abre o banco já na versão mais recente do esquema (copiando-o antes de migrar)."""
     path = Path(path or DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
-    mig = sqlite3.connect(path, isolation_level=None)
+    mig = sqlite3.connect(path, isolation_level=None, timeout=BUSY_TIMEOUT)
     try:
         if version(mig) < LATEST:
             has_tables = mig.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
@@ -234,7 +235,7 @@ def connect(path=None, backup=True):
             migrate(mig)
     finally:
         mig.close()
-    db = sqlite3.connect(path)
+    db = sqlite3.connect(path, timeout=BUSY_TIMEOUT)
     db.execute("PRAGMA foreign_keys = ON")
     return db
 

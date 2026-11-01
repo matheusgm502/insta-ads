@@ -243,3 +243,8 @@ def test_legacy_migration_still_works_with_enforcement_on_afterwards(tmp_path):
     # os dados migrados também respeitam a regra: não dá para apagar o post com métricas
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("DELETE FROM media WHERE id = 'm1'")
+
+
+def test_connections_wait_for_a_competing_writer_instead_of_failing_at_once(tmp_path):
+    db = appdb.connect(tmp_path / "x.sqlite")
+    assert db.execute("PRAGMA busy_timeout").fetchone()[0] == appdb.BUSY_TIMEOUT * 1000

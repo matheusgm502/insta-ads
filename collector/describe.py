@@ -250,6 +250,7 @@ def main():
             shutil.rmtree(outdir, ignore_errors=True)
             outdir.mkdir(parents=True)
             db.execute("DELETE FROM visual_frames WHERE media_id = ?", (m["id"],))
+            db.commit()  # libera a gravação: a chamada ao modelo leva minutos
             for idx, (t, is_cut, jpeg) in enumerate(frames):
                 path = outdir / f"{idx:02d}_{t:06.1f}s.jpg"
                 path.write_bytes(jpeg)
@@ -261,6 +262,7 @@ def main():
                 db.execute("INSERT INTO visual_frames VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                            (m["id"], idx, t, source, int(is_cut), str(path.relative_to(ROOT)),
                             json.dumps(desc, ensure_ascii=False) if desc else None, MODEL, now_iso()))
+                db.commit()
             n_cuts = sum(1 for _, c, _ in frames if c)
             db.execute("INSERT OR REPLACE INTO visual_status VALUES (?, ?, ?, ?, ?, ?, ?)",
                        (m["id"], source, duration, len(frames), n_cuts, MODEL, now_iso()))
