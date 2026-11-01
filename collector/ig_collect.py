@@ -13,7 +13,6 @@ automaticamente a cada 7 dias (token de 60 dias; a renovação exige >= 24 h de 
 
 import argparse
 import json
-import sqlite3
 import sys
 import urllib.error
 import urllib.parse
@@ -23,8 +22,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))  # permite `from app import db` ao rodar o script direto
+
+from app import db as appdb  # noqa: E402  (esquema, migrações, contas)
+
 ENV_PATH = ROOT / ".env"
-DB_PATH = ROOT / "data" / "instagram.sqlite"
+DB_PATH = appdb.DB_PATH
 TZ = ZoneInfo("America/Sao_Paulo")
 
 # Os dados chegam com até 48 h de atraso, então reprocessamos os últimos dias.
@@ -152,85 +155,65 @@ def insight_values(item):
 
 
 # --- banco ------------------------------------------------------------------
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS account_snapshot (
-    date TEXT PRIMARY KEY, followers_count INTEGER, follows_count INTEGER,
-    media_count INTEGER, collected_at TEXT);
-CREATE TABLE IF NOT EXISTS account_insights (
-    date TEXT, metric TEXT, value REAL, collected_at TEXT, PRIMARY KEY (date, metric));
-CREATE TABLE IF NOT EXISTS media (
-    id TEXT PRIMARY KEY, media_type TEXT, media_product_type TEXT, timestamp TEXT,
-    permalink TEXT, caption TEXT, like_count INTEGER, comments_count INTEGER,
-    updated_at TEXT);
-CREATE TABLE IF NOT EXISTS media_insights (
-    media_id TEXT, collected_date TEXT, metric TEXT, value REAL,
-    PRIMARY KEY (media_id, collected_date, metric));
-CREATE TABLE IF NOT EXISTS demographics (
-    collected_date TEXT, breakdown TEXT, key TEXT, value INTEGER,
-    PRIMARY KEY (collected_date, breakdown, key));
-CREATE TABLE IF NOT EXISTS run_log (
-    run_at TEXT, level TEXT, message TEXT);
-"""
-
+# O esquema e as migrações ficam em app/db.py.
 
 def open_db():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DB_PATH)
-    db.executescript(SCHEMA)
-    return db
-
-
-def log(db, level, message):
-    print(f"[{level}] {message}", file=sys.stderr if level != "info" else sys.stdout)
-    db.execute("INSERT INTO run_log VALUES (?, ?, ?)", (now_iso(), level, message))
+    return appdb.connect(DB_PATH)
 
 
 def now_iso():
     return datetime.now(TZ).isoformat(timespec="seconds")
 
 
-def get_meta(db, key):
-    row = db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+def log(db, level, message, account_id=None):
+    print(f"[{level}] {message}", file=sys.stderr if level != "info" else sys.stdout)
+    db.execute("INSERT INTO run_log (account_id, run_at, level, message) VALUES (?, ?, ?, ?)",
+               (account_id, now_iso(), level, message))
+
+
+def get_meta(db, account_id, key):
+    row = db.execute("SELECT value FROM meta WHERE account_id = ? AND key = ?", (account_id, key)).fetchone()
     return row[0] if row else None
 
 
-def set_meta(db, key, value):
-    db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, value))
+def set_meta(db, account_id, key, value):
+    db.execute("INSERT OR REPLACE INTO meta (account_id, key, value) VALUES (?, ?, ?)",
+               (account_id, key, value))
 
 
 # --- etapas -----------------------------------------------------------------
 
-def maybe_refresh_token(db, client, force=False):
-    last = get_meta(db, "token_refreshed_at")
+def maybe_refresh_token(db, client, account_id, force=False):
+    last = get_meta(db, account_id, "token_refreshed_at")
     if not force and last and datetime.fromisoformat(last) > datetime.now(TZ) - TOKEN_REFRESH_EVERY:
         return
     if last is None and not force:
         # Primeira execução: o token pode ter menos de 24 h; só marca a data.
-        set_meta(db, "token_refreshed_at", now_iso())
+        set_meta(db, account_id, "token_refreshed_at", now_iso())
         return
     try:
         data = client.get("refresh_access_token", grant_type="ig_refresh_token")
     except ApiError as e:
-        log(db, "warn", f"renovação do token falhou: {e}")
+        log(db, "warn", f"renovação do token falhou: {e}", account_id)
         return
     client.token = data["access_token"]
     save_token(client.token)
-    set_meta(db, "token_refreshed_at", now_iso())
+    set_meta(db, account_id, "token_refreshed_at", now_iso())
     days = int(data.get("expires_in", 0)) // 86400
-    log(db, "info", f"token renovado (vale ~{days} dias)")
+    log(db, "info", f"token renovado (vale ~{days} dias)", account_id)
 
 
 def collect_account(db, client):
     me = client.get("me", fields="user_id,username,followers_count,follows_count,media_count")
+    account_id = appdb.ensure_account(db, me.get("user_id") or me["id"], me.get("username"))
     today = datetime.now(TZ).date().isoformat()
     db.execute(
-        "INSERT OR REPLACE INTO account_snapshot VALUES (?, ?, ?, ?, ?)",
-        (today, me.get("followers_count"), me.get("follows_count"),
+        "INSERT OR REPLACE INTO account_snapshot (account_id, date, followers_count, follows_count, "
+        "media_count, collected_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (account_id, today, me.get("followers_count"), me.get("follows_count"),
          me.get("media_count"), now_iso()))
-    log(db, "info", f"@{me.get('username')}: {me.get('followers_count')} seguidores")
-    return me
+    log(db, "info", f"@{me.get('username')}: {me.get('followers_count')} seguidores", account_id)
+    return me, account_id
 
 
 def day_bounds(d):
@@ -239,7 +222,7 @@ def day_bounds(d):
     return int(start.timestamp()), int(end.timestamp())
 
 
-def collect_account_insights(db, client, ig_id, days=REPROCESS_DAYS):
+def collect_account_insights(db, client, ig_id, account_id, days=REPROCESS_DAYS):
     today = datetime.now(TZ).date()
     for i in range(1, days + 1):
         d = today - timedelta(days=i)
@@ -249,10 +232,11 @@ def collect_account_insights(db, client, ig_id, days=REPROCESS_DAYS):
             metric_type="total_value", since=since, until=until)
         for item in items:
             for metric, value in insight_values(item):
-                db.execute("INSERT OR REPLACE INTO account_insights VALUES (?, ?, ?, ?)",
-                           (d.isoformat(), metric, value, now_iso()))
+                db.execute("INSERT OR REPLACE INTO account_insights (account_id, date, metric, value, "
+                           "collected_at) VALUES (?, ?, ?, ?, ?)",
+                           (account_id, d.isoformat(), metric, value, now_iso()))
         for metric, err in errors:
-            log(db, "warn", f"conta {d} {metric}: {err}")
+            log(db, "warn", f"conta {d} {metric}: {err}", account_id)
 
 
 def media_kind(m):
@@ -263,7 +247,7 @@ def media_kind(m):
     return "FEED"
 
 
-def save_media_insights(db, client, m):
+def save_media_insights(db, client, m, account_id=None):
     items, errors = client.insights(f"{m['id']}/insights", MEDIA_METRICS[media_kind(m)])
     today = datetime.now(TZ).date().isoformat()
     for item in items:
@@ -271,13 +255,13 @@ def save_media_insights(db, client, m):
             db.execute("INSERT OR REPLACE INTO media_insights VALUES (?, ?, ?, ?)",
                        (m["id"], today, metric, value))
     if errors and not items:
-        log(db, "warn", f"mídia {m['id']} sem insights: {errors[0][1]}")
+        log(db, "warn", f"mídia {m['id']} sem insights: {errors[0][1]}", account_id)
         return
     for metric, err in errors:
-        log(db, "warn", f"mídia {m['id']} {metric}: {err}")
+        log(db, "warn", f"mídia {m['id']} {metric}: {err}", account_id)
 
 
-def collect_media(db, client, all_media=False):
+def collect_media(db, client, account_id, all_media=False):
     fields = ("id,caption,media_type,media_product_type,timestamp,permalink,"
               "like_count,comments_count")
     posts = client.paged("me/media", max_items=100, fields=fields, limit=50)
@@ -285,23 +269,24 @@ def collect_media(db, client, all_media=False):
     try:
         stories = client.paged("me/stories", max_items=50, fields=fields)
     except ApiError as e:
-        log(db, "warn", f"stories: {e}")
+        log(db, "warn", f"stories: {e}", account_id)
     cutoff = datetime.now(timezone.utc) - timedelta(days=MEDIA_REFRESH_DAYS)
     refreshed = 0
     for m in posts + stories:
         db.execute(
-            "INSERT OR REPLACE INTO media VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (m["id"], m.get("media_type"), m.get("media_product_type"), m.get("timestamp"),
+            "INSERT OR REPLACE INTO media (id, account_id, media_type, media_product_type, timestamp, "
+            "permalink, caption, like_count, comments_count, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (m["id"], account_id, m.get("media_type"), m.get("media_product_type"), m.get("timestamp"),
              m.get("permalink"), m.get("caption"), m.get("like_count"),
              m.get("comments_count"), now_iso()))
         ts = datetime.strptime(m["timestamp"], "%Y-%m-%dT%H:%M:%S%z")
         if all_media or ts >= cutoff or media_kind(m) == "STORY":
-            save_media_insights(db, client, m)
+            save_media_insights(db, client, m, account_id)
             refreshed += 1
-    log(db, "info", f"{len(posts)} posts, {len(stories)} stories; insights de {refreshed} mídias")
+    log(db, "info", f"{len(posts)} posts, {len(stories)} stories; insights de {refreshed} mídias", account_id)
 
 
-def collect_demographics(db, client, ig_id):
+def collect_demographics(db, client, ig_id, account_id):
     today = datetime.now(TZ).date().isoformat()
     for bd in DEMOGRAPHIC_BREAKDOWNS:
         try:
@@ -309,14 +294,15 @@ def collect_demographics(db, client, ig_id):
                               period="lifetime", timeframe="this_month",
                               metric_type="total_value", breakdown=bd)
         except ApiError as e:
-            log(db, "warn", f"demografia {bd}: {e} (exige 100+ seguidores)")
+            log(db, "warn", f"demografia {bd}: {e} (exige 100+ seguidores)", account_id)
             continue
         for item in data.get("data", []):
             for metric, value in insight_values(item):
                 if ":" in metric:
-                    db.execute("INSERT OR REPLACE INTO demographics VALUES (?, ?, ?, ?)",
-                               (today, bd, metric.split(":", 1)[1], value))
-    log(db, "info", "demografia coletada")
+                    db.execute("INSERT OR REPLACE INTO demographics (account_id, collected_date, breakdown, "
+                               "key, value) VALUES (?, ?, ?, ?, ?)",
+                               (account_id, today, bd, metric.split(":", 1)[1], value))
+    log(db, "info", "demografia coletada", account_id)
 
 
 # --- main -------------------------------------------------------------------
@@ -344,17 +330,18 @@ def main():
         return
 
     db = open_db()
+    account_id = None
     try:
-        maybe_refresh_token(db, client, force=args.refresh_token)
-        me = collect_account(db, client)
+        me, account_id = collect_account(db, client)
         ig_id = me.get("user_id") or me["id"]
-        collect_account_insights(db, client, ig_id, days=args.days)
-        collect_media(db, client, all_media=args.all_media)
+        maybe_refresh_token(db, client, account_id, force=args.refresh_token)
+        collect_account_insights(db, client, ig_id, account_id, days=args.days)
+        collect_media(db, client, account_id, all_media=args.all_media)
         if args.demographics or date.today().weekday() == 0:  # segunda-feira
-            collect_demographics(db, client, ig_id)
+            collect_demographics(db, client, ig_id, account_id)
         db.commit()
     except ApiError as e:
-        log(db, "error", str(e))
+        log(db, "error", str(e), account_id)
         db.commit()
         sys.exit(1)
     finally:

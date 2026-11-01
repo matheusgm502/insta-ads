@@ -26,7 +26,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from ig_collect import ROOT, ApiError, Client, load_env, log, now_iso, open_db
+from ig_collect import ROOT, ApiError, Client, appdb, load_env, log, now_iso, open_db
 
 MODEL = "qwen2.5vl:3b"
 OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -69,16 +69,6 @@ SCHEMA = {
     "required": ["cenario", "iluminacao", "enquadramento", "pessoas", "pessoa_descricao",
                  "acao", "texto_na_tela", "elementos_graficos", "cores_predominantes"],
 }
-
-DB_SCHEMA = """
-CREATE TABLE IF NOT EXISTS visual_frames (
-    media_id TEXT, idx INTEGER, t REAL, source TEXT, is_cut INTEGER, path TEXT,
-    description TEXT, model TEXT, described_at TEXT, PRIMARY KEY (media_id, idx));
-CREATE TABLE IF NOT EXISTS visual_status (
-    media_id TEXT PRIMARY KEY, source TEXT, duration REAL, n_frames INTEGER,
-    n_cuts INTEGER, model TEXT, done_at TEXT);
-"""
-
 
 # --- Ollama -----------------------------------------------------------------
 
@@ -227,7 +217,6 @@ def main():
         sys.exit("IG_ACCESS_TOKEN vazio no .env.")
     client = Client(env["IG_ACCESS_TOKEN"], env.get("IG_API_VERSION", ""))
     db = open_db()
-    db.executescript(DB_SCHEMA)
 
     fields = ("id,caption,media_type,media_product_type,timestamp,permalink,media_url,"
               "thumbnail_url,children{media_type,media_url,thumbnail_url}")
@@ -235,10 +224,11 @@ def main():
         media = client.paged("me/media", max_items=500, fields=fields, limit=50)
     except ApiError as e:
         sys.exit(f"Erro da API: {e}")
+    account_id = appdb.default_account_id(db)
     for m in media:  # garante que o post exista na tabela media
-        db.execute("INSERT OR IGNORE INTO media (id, media_type, media_product_type, timestamp, "
-                   "permalink, caption, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                   (m["id"], m.get("media_type"), m.get("media_product_type"), m.get("timestamp"),
+        db.execute("INSERT OR IGNORE INTO media (id, account_id, media_type, media_product_type, "
+                   "timestamp, permalink, caption, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                   (m["id"], account_id, m.get("media_type"), m.get("media_product_type"), m.get("timestamp"),
                     m.get("permalink"), m.get("caption"), now_iso()))
     db.commit()
 

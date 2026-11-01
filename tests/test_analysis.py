@@ -7,26 +7,29 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import analysis
+from app import db as appdb
 
-SCHEMA = """
-CREATE TABLE media (id TEXT PRIMARY KEY, media_type TEXT, media_product_type TEXT, timestamp TEXT,
-    permalink TEXT, caption TEXT, like_count INTEGER, comments_count INTEGER, updated_at TEXT);
-CREATE TABLE media_insights (media_id TEXT, collected_date TEXT, metric TEXT, value REAL,
-    PRIMARY KEY (media_id, collected_date, metric));
-CREATE TABLE transcripts (media_id TEXT PRIMARY KEY, model TEXT, language TEXT, duration REAL,
-    hook TEXT, text TEXT, segments TEXT, transcribed_at TEXT);
-CREATE TABLE visual_status (media_id TEXT PRIMARY KEY, source TEXT, duration REAL, n_frames INTEGER,
-    n_cuts INTEGER, model TEXT, done_at TEXT);
-CREATE TABLE visual_frames (media_id TEXT, idx INTEGER, t REAL, source TEXT, is_cut INTEGER, path TEXT,
-    description TEXT, model TEXT, described_at TEXT, PRIMARY KEY (media_id, idx));
-"""
+
+
+def new_db(path):
+    """Banco no esquema real do app, com uma conta de teste."""
+    db = appdb.connect(path)
+    appdb.ensure_account(db, "conta-teste", "conta_teste")
+    return db
+
+
+def insert_media(db, pid, ptype, ts, caption=""):
+    db.execute("INSERT INTO media (id, account_id, media_type, media_product_type, timestamp, permalink, "
+               "caption, like_count, comments_count, updated_at) VALUES (?, 1, 'VIDEO', ?, ?, ?, ?, 0, 0, ?)",
+               (pid, ptype, ts, f"https://example.test/{pid}", caption, ts))
+
+
 BASE = datetime(2026, 3, 2, 15, 0, tzinfo=timezone.utc)  # uma segunda-feira
 
 
 def add_post(db, pid, kind="REELS", reach=500, shares=10, hook=None, days=0, hours=0, caption="legenda"):
     ts = (BASE + timedelta(days=days, hours=hours)).strftime("%Y-%m-%dT%H:%M:%S+0000")
-    db.execute("INSERT INTO media VALUES (?,?,?,?,?,?,?,?,?)",
-               (pid, "VIDEO", kind, ts, f"https://example.test/{pid}", caption, 0, 0, ts))
+    insert_media(db, pid, kind, ts, caption)
     for metric, value in (("reach", reach), ("shares", shares), ("saved", 1)):
         db.execute("INSERT INTO media_insights VALUES (?,?,?,?)", (pid, "2026-03-30", metric, value))
     if hook is not None:
@@ -36,8 +39,7 @@ def add_post(db, pid, kind="REELS", reach=500, shares=10, hook=None, days=0, hou
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "t.sqlite"
-    db = sqlite3.connect(path)
-    db.executescript(SCHEMA)
+    db = new_db(path)
     # 20 Reels: os 10 com pergunta no gancho alcançam muito mais que os outros 10
     for i in range(10):
         add_post(db, f"q{i}", reach=1000 + i * 10, hook="Você já pensou nisso?", days=i)
@@ -95,7 +97,7 @@ def test_viral_post_is_flagged_and_left_out_of_the_tests(db_path):
 def test_posts_without_metrics_are_skipped(db_path):
     db = sqlite3.connect(db_path)
     ts = BASE.strftime("%Y-%m-%dT%H:%M:%S+0000")
-    db.execute("INSERT INTO media VALUES ('sem','VIDEO','REELS',?,'x','',0,0,?)", (ts, ts))
+    insert_media(db, "sem", "REELS", ts)
     db.commit()
     db.close()
     assert "sem" not in {p.id for p in analysis.load_posts(db_path)}
@@ -103,10 +105,9 @@ def test_posts_without_metrics_are_skipped(db_path):
 
 def test_timestamps_are_converted_to_the_configured_timezone(tmp_path):
     path = tmp_path / "tz.sqlite"
-    db = sqlite3.connect(path)
-    db.executescript(SCHEMA)
+    db = new_db(path)
     ts = "2026-03-01T01:30:00+0000"  # domingo 01:30 UTC = sábado 22:30 em São Paulo
-    db.execute("INSERT INTO media VALUES ('a','VIDEO','REELS',?,'x','',0,0,?)", (ts, ts))
+    insert_media(db, "a", "REELS", ts)
     db.execute("INSERT INTO media_insights VALUES ('a','d','reach',10)")
     db.commit()
     db.close()
@@ -116,11 +117,10 @@ def test_timestamps_are_converted_to_the_configured_timezone(tmp_path):
 
 def test_screen_text_ignores_negative_descriptions(tmp_path):
     path = tmp_path / "v.sqlite"
-    db = sqlite3.connect(path)
-    db.executescript(SCHEMA)
+    db = new_db(path)
     ts = BASE.strftime("%Y-%m-%dT%H:%M:%S+0000")
     for pid, text in (("com", "Você já tentou?"), ("sem", "Nenhum")):
-        db.execute("INSERT INTO media VALUES (?,'VIDEO','REELS',?,'x','',0,0,?)", (pid, ts, ts))
+        insert_media(db, pid, "REELS", ts)
         db.execute("INSERT INTO media_insights VALUES (?,'d','reach',10)", (pid,))
         db.execute("INSERT INTO visual_status VALUES (?,'video',30,1,0,'m',?)", (pid, ts))
         db.execute("INSERT INTO visual_frames VALUES (?,0,0,'video',0,'p',?,'m',?)",

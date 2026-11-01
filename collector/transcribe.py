@@ -23,21 +23,12 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from ig_collect import ROOT, TZ, ApiError, Client, load_env, log, now_iso, open_db
+from ig_collect import ROOT, TZ, ApiError, Client, appdb, load_env, log, now_iso, open_db
 
 DEFAULT_MODEL = "medium"
 # Trecho inicial tratado como "gancho" do Reel.
 HOOK_SECONDS = 3.0
 EXPORT_PATH = ROOT / "reports" / "roteiros.md"
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS transcripts (
-    media_id TEXT PRIMARY KEY, model TEXT, language TEXT, duration REAL,
-    hook TEXT, text TEXT, segments TEXT, transcribed_at TEXT);
-CREATE TABLE IF NOT EXISTS transcript_skips (
-    media_id TEXT PRIMARY KEY, reason TEXT, checked_at TEXT);
-"""
-
 
 def list_videos(client):
     fields = "id,caption,media_type,media_product_type,timestamp,permalink,media_url"
@@ -107,7 +98,6 @@ def main():
     args = ap.parse_args()
 
     db = open_db()
-    db.executescript(SCHEMA)
     if args.export_only:
         export(db)
         return
@@ -123,10 +113,11 @@ def main():
 
     done = {r[0] for r in db.execute("SELECT media_id FROM transcripts")}
     todo = [v for v in videos if args.force or v["id"] not in done]
+    account_id = appdb.default_account_id(db)
     for v in videos:  # garante que o post exista na tabela media para o relatório
-        db.execute("INSERT OR IGNORE INTO media (id, media_type, media_product_type, timestamp, "
-                   "permalink, caption, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                   (v["id"], v.get("media_type"), v.get("media_product_type"), v.get("timestamp"),
+        db.execute("INSERT OR IGNORE INTO media (id, account_id, media_type, media_product_type, "
+                   "timestamp, permalink, caption, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                   (v["id"], account_id, v.get("media_type"), v.get("media_product_type"), v.get("timestamp"),
                     v.get("permalink"), v.get("caption"), now_iso()))
     no_url = [v for v in todo if not v.get("media_url")]
     for v in no_url:

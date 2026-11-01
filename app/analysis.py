@@ -25,6 +25,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from app import db as appdb
+
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("APP_DB", ROOT / "data" / "instagram.sqlite"))
 TZ = ZoneInfo(os.environ.get("APP_TZ", "America/Sao_Paulo"))
@@ -73,7 +75,8 @@ def _has_text(value):
 
 
 def load_posts(db_path=None):
-    db = sqlite3.connect(db_path or DB_PATH)
+    db = appdb.connect(db_path or DB_PATH)
+    account_id = appdb.default_account_id(db)
     latest = {}
     for media_id, metric, value in db.execute("""
             SELECT i.media_id, i.metric, i.value FROM media_insights i
@@ -93,7 +96,8 @@ def load_posts(db_path=None):
             texts[media_id] = texts.get(media_id, False) or found
     posts = []
     for mid, ptype, ts, link, cap in db.execute(
-            "SELECT id, media_product_type, timestamp, permalink, caption FROM media"):
+            "SELECT id, media_product_type, timestamp, permalink, caption FROM media WHERE account_id = ?",
+            (account_id,)):
         kind = {"REELS": "REELS", "FEED": "FEED"}.get(ptype)
         metrics = latest.get(mid)
         if not kind or not metrics or metrics.get("reach") is None:

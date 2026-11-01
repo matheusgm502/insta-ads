@@ -1,0 +1,229 @@
+// Esquema do banco local (data/instagram.sqlite), versão 1, em DBML.
+// Para ver o diagrama: cole este arquivo em https://dbdiagram.io/d (só o esquema, sem dados).
+//
+// Fonte da verdade: app/db.py (SCHEMA_V1 e migrações). A versão fica em PRAGMA user_version.
+// As chaves estrangeiras estão declaradas e conferidas (PRAGMA foreign_key_check), mas o
+// SQLite não as impõe em tempo de execução. Datas "AAAA-MM-DD" são locais; `timestamp` dos
+// posts vem da Meta em UTC. Valores em dinheiro são guardados em centavos.
+
+Project instagram_growth {
+  database_type: 'SQLite'
+  Note: 'Dados de contas profissionais do Instagram, definições do usuário e controle.'
+}
+
+// ---------------------------------------------------------------- CONTA
+
+Table account {
+  id integer [pk, increment]
+  ig_user_id text [unique, note: 'ID da conta no Instagram. Nulo só na conta provisória deixada pela migração; o coletor completa']
+  username text
+  timezone text [not null, default: 'America/Sao_Paulo']
+  status text [not null, default: 'active', note: 'active | disconnected']
+  created_at text [not null]
+  Note: 'Âncora de tudo: cada dado e cada definição pertence a uma conta.'
+}
+
+Table account_snapshot {
+  account_id integer [not null, ref: > account.id]
+  date date [not null, note: 'Um registro por dia de coleta']
+  followers_count integer [note: 'A API só guarda ~30 dias; este é o nosso histórico']
+  follows_count integer
+  media_count integer
+  collected_at text
+  indexes { (account_id, date) [pk] }
+  Note: 'Foto diária da conta. Só cresce se o coletor rodar todo dia.'
+}
+
+Table account_insights {
+  account_id integer [not null, ref: > account.id]
+  date date [not null]
+  metric text [not null, note: 'reach, views, accounts_engaged, total_interactions, likes, comments, shares, saves, replies, profile_links_taps']
+  value real
+  collected_at text
+  indexes { (account_id, date, metric) [pk] }
+  Note: 'Métricas diárias da conta, em formato longo: métrica nova não muda a tabela.'
+}
+
+Table demographics {
+  account_id integer [not null, ref: > account.id]
+  collected_date date [not null, note: 'Coletada às segundas']
+  breakdown text [not null, note: 'age, gender ou city']
+  key text [not null]
+  value integer [note: 'Seguidores nesse grupo']
+  indexes { (account_id, collected_date, breakdown, key) [pk] }
+  Note: 'Quem segue a conta. Só existe com 100+ seguidores.'
+}
+
+// ---------------------------------------------------------------- POSTS
+// Os dados de um post herdam a conta pelo media_id.
+
+Table media {
+  id text [pk, note: 'ID do post na Meta (único no mundo)']
+  account_id integer [not null, ref: > account.id]
+  media_type text [note: 'VIDEO, IMAGE ou CAROUSEL_ALBUM']
+  media_product_type text [note: 'REELS, FEED ou STORY']
+  timestamp text [note: 'Publicação, em UTC']
+  permalink text
+  caption text
+  like_count integer
+  comments_count integer
+  updated_at text
+  indexes { (account_id, timestamp) }
+}
+
+Table media_insights {
+  media_id text [not null, ref: > media.id]
+  collected_date date [not null, note: 'Cada coleta grava de novo; a análise usa a mais recente']
+  metric text [not null, note: 'reach, views, likes, comments, shares, saved, total_interactions, follows, profile_visits, ig_reels_avg_watch_time']
+  value real
+  indexes { (media_id, collected_date, metric) [pk] }
+}
+
+// ---------------------------------------------------------------- FALA E VISUAL
+
+Table transcripts {
+  media_id text [pk, ref: - media.id]
+  model text
+  language text
+  duration real
+  hook text [note: 'Trecho falado que começa antes dos 3 s']
+  text text
+  segments text [note: 'JSON: lista de {start, end, text}']
+  transcribed_at text
+}
+
+Table transcript_skips {
+  media_id text [pk, ref: - media.id]
+  reason text [note: 'Ex.: sem arquivo de vídeo na API']
+  checked_at text
+}
+
+Table visual_status {
+  media_id text [pk, ref: - media.id]
+  source text [note: 'video, capa, carrossel ou imagem']
+  duration real
+  n_frames integer
+  n_cuts integer
+  model text
+  done_at text
+}
+
+Table visual_frames {
+  media_id text [not null, ref: > media.id]
+  idx integer [not null]
+  t real [note: 'Segundo do vídeo']
+  source text
+  is_cut integer
+  path text
+  description text [note: 'JSON: cenário, iluminação, enquadramento, pessoas, ação, texto_na_tela, elementos_graficos, cores']
+  model text
+  described_at text
+  indexes { (media_id, idx) [pk] }
+}
+
+// ---------------------------------------------------------------- DEFINIÇÕES DO USUÁRIO
+
+Table brief_version {
+  id integer [pk, increment]
+  account_id integer [not null, ref: > account.id]
+  version integer [not null]
+  status text [not null, note: 'draft | confirmed | superseded. Só "confirmed" vale']
+  source text [not null, note: 'generated (rascunho do app) | edited (ajustado pelo usuário)']
+  content text [not null, note: 'JSON validado por um modelo Pydantic: tom, público, objetivo, estética, temas, regras do conselho']
+  created_at text [not null]
+  confirmed_at text
+  indexes { (account_id, version) [unique] }
+  Note: 'Brief da marca com histórico. Nada é sobrescrito: cada ajuste vira uma versão.'
+}
+
+Table guardrail_set {
+  id integer [pk, increment]
+  account_id integer [not null, ref: > account.id]
+  version integer [not null]
+  status text [not null, note: 'draft | confirmed | superseded. Sem um confirmado, nenhum gasto é permitido']
+  currency text [not null, default: 'BRL']
+  monthly_budget_cents integer
+  daily_budget_cents integer
+  max_cost_per_follower_cents integer [note: 'Meta de sucesso']
+  hard_stop_cost_per_follower_cents integer [note: 'Acima disso, pausar tudo']
+  no_change_days integer [note: 'Dias iniciais sem mexer (fase de aprendizado)']
+  checkpoint_days integer
+  evaluation_days integer
+  requires_approval text [not null, default: '[]', note: 'JSON: ações que exigem aprovação (activate, change_budget, ...)']
+  pause_without_approval integer [not null, default: 1, note: '1 = o app pode pausar sozinho']
+  created_at text [not null]
+  confirmed_at text
+  indexes { (account_id, version) [unique] }
+  Note: 'Limites que o código aplica, em colunas numéricas consultáveis.'
+}
+
+Table preference {
+  account_id integer [pk, ref: - account.id]
+  channel text [not null, default: 'none', note: 'whatsapp | email | none']
+  address text [note: 'Número ou e-mail de contato']
+  summary_frequency text [not null, default: 'weekly', note: 'weekly | biweekly | monthly']
+  summary_weekday integer [not null, default: 0, note: '0 = segunda']
+  summary_hour integer [not null, default: 9]
+  updated_at text [not null]
+}
+
+Table consent_log {
+  id integer [pk, increment]
+  account_id integer [not null, ref: > account.id]
+  purpose text [not null, note: 'instagram_data_access | local_media_analysis | llm_text_processing | ads_account_access']
+  provider text [note: 'Fornecedor, quando a finalidade o envolve (ex.: openai)']
+  granted integer [not null, note: '1 autoriza, 0 revoga']
+  note text
+  recorded_at text [not null]
+  Note: 'Só cresce: revogar é gravar uma linha nova. O último registro de cada finalidade decide.'
+}
+
+// ---------------------------------------------------------------- CONTROLE
+
+Table meta {
+  account_id integer [not null, ref: > account.id]
+  key text [not null, note: 'Ex.: token_refreshed_at']
+  value text
+  indexes { (account_id, key) [pk] }
+}
+
+Table run_log {
+  account_id integer [ref: > account.id, note: 'Nulo para eventos que não são de uma conta']
+  run_at text
+  level text [note: 'info, warn ou error']
+  message text
+  indexes { run_at }
+}
+
+// ---------------------------------------------------------------- GRUPOS
+
+TableGroup conta {
+  account
+  account_snapshot
+  account_insights
+  demographics
+}
+
+TableGroup posts {
+  media
+  media_insights
+}
+
+TableGroup fala_e_visual {
+  transcripts
+  transcript_skips
+  visual_status
+  visual_frames
+}
+
+TableGroup definicoes_do_usuario {
+  brief_version
+  guardrail_set
+  preference
+  consent_log
+}
+
+TableGroup controle {
+  meta
+  run_log
+}

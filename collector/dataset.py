@@ -16,7 +16,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from ig_collect import DB_PATH, ROOT, TZ
+from ig_collect import DB_PATH, ROOT, TZ, appdb
 
 OUT_DIR = ROOT / "data" / "dataset"
 MD_DIR = ROOT / "reports" / "posts"
@@ -137,14 +137,15 @@ def render_md(p):
 
 
 def main():
-    db = sqlite3.connect(DB_PATH)
+    db = appdb.connect(DB_PATH)
+    account_id = appdb.default_account_id(db)
     has_t = table_exists(db, "transcripts")
     has_s = table_exists(db, "transcript_skips")
     has_v = table_exists(db, "visual_status")
     posts = []
     for mid, mtype, ptype, ts, link, cap in db.execute(
             "SELECT id, media_type, media_product_type, timestamp, permalink, caption "
-            "FROM media ORDER BY timestamp DESC"):
+            "FROM media WHERE account_id = ? ORDER BY timestamp DESC", (account_id,)):
         audio = audio_for(db, mid, has_t, has_s)
         visual = visual_for(db, mid, has_v)
         local = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z").astimezone(TZ)
