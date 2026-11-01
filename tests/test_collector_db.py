@@ -59,3 +59,19 @@ def test_token_refresh_marker_is_kept_per_account(tmp_path):
     assert ig_collect.get_meta(db, a, "token_refreshed_at") is not None
     ig_collect.set_meta(db, b, "token_refreshed_at", "2020-01-01")
     assert ig_collect.get_meta(db, a, "token_refreshed_at") != "2020-01-01"
+
+
+def test_collecting_again_updates_posts_in_place_with_enforcement_on(tmp_path):
+    """A segunda coleta atualiza o post que já tem métricas, sem apagá-lo nem perder filhos."""
+    db = appdb.connect(tmp_path / "x.sqlite")
+    client = FakeClient("111", "conta_a", 100)
+    run_once(db, client)
+    db.execute("INSERT INTO transcripts (media_id, model) VALUES ('111-post', 'm')")  # um filho a mais
+    before = {t: db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+              for t in ("media", "media_insights", "transcripts", "account_insights")}
+    client.me["followers_count"] = 150
+    run_once(db, client)
+    after = {t: db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+             for t in ("media", "media_insights", "transcripts", "account_insights")}
+    assert after == before
+    assert db.execute("PRAGMA foreign_key_check").fetchall() == []

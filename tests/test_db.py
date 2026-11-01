@@ -173,17 +173,19 @@ def test_brief_has_versions_and_only_a_confirmed_one_counts(conn):
 def test_guardrails_are_enforced_only_when_confirmed(conn):
     assert appdb.current_guardrails(conn._db, conn.account) is None  # sem teto, sem gasto
     v = appdb.save_guardrails(conn._db, conn.account, monthly_budget_cents=50000, max_cost_per_follower_cents=400,
-                              requires_approval=["activate", "change_budget"])
+                              requires_approval=["activate_campaign", "increase_budget"])
     assert appdb.current_guardrails(conn._db, conn.account) is None
     appdb.confirm_guardrails(conn._db, conn.account, v)
     g = appdb.current_guardrails(conn._db, conn.account)
     assert g["monthly_budget_cents"] == 50000 and g["currency"] == "BRL"
-    assert g["requires_approval"] == ["activate", "change_budget"] and g["pause_without_approval"] is True
+    assert g["requires_approval"] == ["activate_campaign", "increase_budget"] and g["pause_without_approval"] is True
 
 
-def test_guardrails_reject_unknown_fields_and_negative_amounts(conn):
+def test_guardrails_reject_unknown_fields_actions_and_negative_amounts(conn):
     with pytest.raises(ValueError, match="desconhecidos"):
         appdb.save_guardrails(conn._db, conn.account, teto_magico=1)
+    with pytest.raises(ValueError, match="Ações desconhecidas"):
+        appdb.save_guardrails(conn._db, conn.account, requires_approval=["activate"])
     with pytest.raises(sqlite3.IntegrityError):
         appdb.save_guardrails(conn._db, conn.account, monthly_budget_cents=-1)
 
@@ -207,3 +209,37 @@ def test_consent_log_only_grows_and_the_latest_record_wins(conn):
     assert conn.execute("SELECT COUNT(*) FROM consent_log").fetchone()[0] == 2
     with pytest.raises(ValueError, match="Finalidade"):
         appdb.record_consent(conn._db, conn.account, "outra_coisa", True)
+
+
+# --- chaves estrangeiras impostas -------------------------------------------
+
+def test_foreign_keys_are_enforced_on_every_connection(tmp_path):
+    db = appdb.connect(tmp_path / "x.sqlite")
+    assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+        db.execute("INSERT INTO media_insights (media_id, collected_date, metric, value) VALUES ('nao-existe','d','m',1)")
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+        db.execute("INSERT INTO account_snapshot (account_id, date) VALUES (999, '2026-11-01')")
+
+
+def test_a_parent_with_children_cannot_be_deleted(tmp_path):
+    db = appdb.connect(tmp_path / "x.sqlite")
+    account = appdb.ensure_account(db, "a")
+    db.execute("INSERT INTO media (id, account_id) VALUES ('m', ?)", (account,))
+    db.execute("INSERT INTO media_insights (media_id, collected_date, metric, value) VALUES ('m','d','reach',1)")
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+        db.execute("DELETE FROM media WHERE id = 'm'")
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+        db.execute("DELETE FROM account WHERE id = ?", (account,))
+    assert db.execute("SELECT COUNT(*) FROM media_insights").fetchone()[0] == 1  # nada foi perdido
+
+
+def test_legacy_migration_still_works_with_enforcement_on_afterwards(tmp_path):
+    path = tmp_path / "antigo.sqlite"
+    legacy_db(path)
+    db = appdb.connect(path)
+    assert counts(db) == COUNTS
+    assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    # os dados migrados também respeitam a regra: não dá para apagar o post com métricas
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute("DELETE FROM media WHERE id = 'm1'")

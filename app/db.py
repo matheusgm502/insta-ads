@@ -5,8 +5,9 @@ Só biblioteca padrão (os scripts do coletor rodam sem ambiente virtual).
 - A versão do esquema fica em `PRAGMA user_version`; `connect()` aplica as migrações
   pendentes, cada uma numa transação única, depois de copiar o banco para `backups/`.
 - Tudo que é de uma conta carrega `account_id`; os dados de um post herdam a conta pelo
-  `media_id`. As chaves estrangeiras estão declaradas e conferidas (`foreign_key_check`),
-  mas não impostas em tempo de execução.
+  `media_id`. As chaves estrangeiras são **impostas** em toda conexão (`foreign_keys=ON`):
+  gravar um dado sem o pai, ou apagar um pai que ainda tem filhos, dá erro e não perde nada.
+  Durante migrações ficam desligadas (reconstruir tabelas exige) e são conferidas no fim.
 - Definições do usuário: brief e guardrails têm versão e estado (rascunho, confirmado,
   substituído); só o que está **confirmado** vale. Sem guardrails confirmados, nenhum
   gasto pode ser feito. Consentimentos são um registro que só cresce.
@@ -24,6 +25,8 @@ DB_PATH = Path(os.environ.get("APP_DB", ROOT / "data" / "instagram.sqlite"))
 DEFAULT_TZ = "America/Sao_Paulo"
 
 STATUSES = ("draft", "confirmed", "superseded")
+APPROVAL_ACTIONS = ("create_campaign", "activate_campaign", "increase_budget",
+                    "change_audience", "change_creative")
 CONSENT_PURPOSES = ("instagram_data_access", "local_media_analysis",
                     "llm_text_processing", "ads_account_access")
 GUARDRAIL_FIELDS = {
@@ -190,6 +193,7 @@ def version(db):
 
 def migrate(db):
     """Aplica as migrações pendentes. `db` deve estar em modo autocommit (isolation_level=None)."""
+    db.execute("PRAGMA foreign_keys = OFF")  # reconstruir tabelas exige; conferido ao final
     current = version(db)
     for target, fn in enumerate(MIGRATIONS, start=1):
         if target <= current:
@@ -230,7 +234,9 @@ def connect(path=None, backup=True):
             migrate(mig)
     finally:
         mig.close()
-    return sqlite3.connect(path)
+    db = sqlite3.connect(path)
+    db.execute("PRAGMA foreign_keys = ON")
+    return db
 
 
 # --- contas -----------------------------------------------------------------
@@ -307,7 +313,12 @@ def save_guardrails(db, account_id, **fields):
     if unknown:
         raise ValueError(f"Campos desconhecidos: {sorted(unknown)}")
     if "requires_approval" in fields:
-        fields["requires_approval"] = json.dumps(list(fields["requires_approval"]))
+        actions = list(fields["requires_approval"])
+        invalid = set(actions) - set(APPROVAL_ACTIONS)
+        if invalid:
+            raise ValueError(f"Ações desconhecidas em requires_approval: {sorted(invalid)}. "
+                             f"Válidas: {APPROVAL_ACTIONS}")
+        fields["requires_approval"] = json.dumps(actions)
     number = _next_version(db, "guardrail_set", account_id)
     columns = ["account_id", "version", "status", "created_at", *fields]
     values = [account_id, number, "draft", now_iso(), *fields.values()]

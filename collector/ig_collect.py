@@ -274,8 +274,12 @@ def collect_media(db, client, account_id, all_media=False):
     refreshed = 0
     for m in posts + stories:
         db.execute(
-            "INSERT OR REPLACE INTO media (id, account_id, media_type, media_product_type, timestamp, "
-            "permalink, caption, like_count, comments_count, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO media (id, account_id, media_type, media_product_type, timestamp, "
+            "permalink, caption, like_count, comments_count, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, media_type = excluded.media_type, "
+            "media_product_type = excluded.media_product_type, timestamp = excluded.timestamp, "
+            "permalink = excluded.permalink, caption = excluded.caption, like_count = excluded.like_count, "
+            "comments_count = excluded.comments_count, updated_at = excluded.updated_at",
             (m["id"], account_id, m.get("media_type"), m.get("media_product_type"), m.get("timestamp"),
              m.get("permalink"), m.get("caption"), m.get("like_count"),
              m.get("comments_count"), now_iso()))

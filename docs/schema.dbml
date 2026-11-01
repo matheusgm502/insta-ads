@@ -2,8 +2,9 @@
 // Para ver o diagrama: cole este arquivo em https://dbdiagram.io/d (só o esquema, sem dados).
 //
 // Fonte da verdade: app/db.py (SCHEMA_V1 e migrações). A versão fica em PRAGMA user_version.
-// As chaves estrangeiras estão declaradas e conferidas (PRAGMA foreign_key_check), mas o
-// SQLite não as impõe em tempo de execução. Datas "AAAA-MM-DD" são locais; `timestamp` dos
+// As chaves estrangeiras são impostas em toda conexão (PRAGMA foreign_keys = ON): gravar sem
+// o pai ou apagar um pai que tem filhos dá erro. Durante migrações ficam desligadas e são
+// conferidas no fim (PRAGMA foreign_key_check). Datas "AAAA-MM-DD" são locais; `timestamp` dos
 // posts vem da Meta em UTC. Valores em dinheiro são guardados em centavos.
 
 Project instagram_growth {
