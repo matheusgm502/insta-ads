@@ -52,6 +52,7 @@ class Post:
     duration: float | None = None
     n_cuts: int | None = None
     has_screen_text: bool | None = None
+    speech: str | None = None
     ratios: dict = field(default_factory=dict)   # métrica -> valor / mediana do tipo
     outlier: bool = False
 
@@ -85,7 +86,7 @@ def load_posts(db_path=None):
         latest.setdefault(media_id, {})[metric] = value
     hooks, cuts, texts = {}, {}, {}
     if _has_table(db, "transcripts"):
-        hooks = {r[0]: (r[1], r[2]) for r in db.execute("SELECT media_id, hook, duration FROM transcripts")}
+        hooks = {r[0]: (r[1], r[2], r[3]) for r in db.execute("SELECT media_id, hook, duration, text FROM transcripts")}
     if _has_table(db, "visual_status"):
         cuts = {r[0]: r[1] for r in db.execute("SELECT media_id, n_cuts FROM visual_status WHERE source = 'video'")}
         for media_id, desc in db.execute("SELECT media_id, description FROM visual_frames WHERE description IS NOT NULL"):
@@ -102,10 +103,10 @@ def load_posts(db_path=None):
         metrics = latest.get(mid)
         if not kind or not metrics or metrics.get("reach") is None:
             continue
-        hook, duration = hooks.get(mid, (None, None))
+        hook, duration, speech = hooks.get(mid, (None, None, None))
         posts.append(Post(
             id=mid, date=datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z").astimezone(TZ), kind=kind,
-            permalink=link or "", caption=cap or "", metrics=metrics, hook=hook, duration=duration,
+            permalink=link or "", caption=cap or "", metrics=metrics, hook=hook, duration=duration, speech=speech,
             n_cuts=cuts.get(mid), has_screen_text=texts.get(mid)))
     db.close()
     return sorted(posts, key=lambda p: p.date)
