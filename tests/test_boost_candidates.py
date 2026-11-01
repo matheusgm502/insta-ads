@@ -31,7 +31,7 @@ def test_promise_testimonial_and_sensationalism_are_flagged():
     assert "promessa_de_resultado" in codes(make_post("Garanto que você vai melhorar"))
     assert "promessa_de_resultado" in codes(make_post("Resultado em 100% dos casos"))
     assert "depoimento_ou_caso" in codes(make_post("", "Uma paciente me contou que..."))
-    assert "sensacionalismo" in codes(make_post("O segredo que ninguém te conta"))
+    assert "sensacionalismo" in codes(make_post("Isso é chocante, não ignore"))
 
 
 def test_words_that_merely_contain_a_trigger_are_not_flagged():
