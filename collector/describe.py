@@ -6,9 +6,9 @@ um modelo de visão local (Ollama + Qwen2.5-VL 3B). Só descrição, sem avalia�
     .venv/bin/python collector/describe.py --include-images   # inclui posts de foto e carrossel
     .venv/bin/python collector/describe.py --limit 2 --force
 
-Frames: o primeiro (~0,5 s, gancho), um em cada corte de cena detectado e, entre
-cortes, no máximo MAX_GAP segundos de intervalo. Vídeos sem arquivo na API usam só
-a capa. Os frames ficam em data/frames/<id>/ e as descrições em data/instagram.sqlite
+Frames: o primeiro (~0,5 s, gancho) e um em cada corte de cena detectado, no máximo
+MAX_FRAMES. Vídeo sem corte tem um único frame: não se reavalia o que não mudou. Vídeos
+sem arquivo na API usam só a capa. Os frames ficam em data/frames/<id>/ e as descrições em data/instagram.sqlite
 (tabelas visual_frames e visual_status). Tudo local e fora do git.
 """
 
@@ -36,8 +36,7 @@ FRAMES_DIR = ROOT / "data" / "frames"
 SAMPLE_EVERY = 0.5     # s entre amostras para detectar cortes
 CUT_THRESHOLD = 28.0   # diferença média de pixel (0–255) que conta como corte
 MIN_SPACING = 1.0      # s mínimos entre frames escolhidos
-MAX_GAP = 5.0          # s máximos sem frame
-MAX_FRAMES = 12
+MAX_FRAMES = 8          # teto para vídeos com muitos cortes
 FRAME_MAX_SIDE = 768   # px; imagens menores = descrição mais rápida
 
 PROMPT = """Esta imagem é um quadro de um post do Instagram de um perfil profissional.
@@ -147,24 +146,17 @@ def pick_frames(video_path):
         return duration, []
 
     first = next((s for s in samples if s[0] >= 0.5), samples[0])
-    chosen = {first[0]: True}
+    chosen = {first[0]: True}  # o primeiro frame e cada corte de cena
     for prev, cur in zip(samples, samples[1:]):
         if float(np.abs(cur[2] - prev[2]).mean()) > CUT_THRESHOLD:
             if all(abs(cur[0] - t) >= MIN_SPACING for t in chosen):
                 chosen[cur[0]] = True
-    # Preenche intervalos longos sem frame
-    times = sorted(chosen)
-    for s in samples:
-        nearest = min(abs(s[0] - t) for t in times)
-        if nearest >= MAX_GAP:
-            chosen.setdefault(s[0], False)
-            times = sorted(chosen)
     times = sorted(chosen)
     if len(times) > MAX_FRAMES:  # mantém o primeiro e espalha o resto
         step = (len(times) - 1) / (MAX_FRAMES - 1)
         times = [times[round(i * step)] for i in range(MAX_FRAMES)]
     by_t = {s[0]: s[1] for s in samples}
-    return duration, [(t, chosen[t] and t != first[0], to_jpeg(by_t[t])) for t in times]
+    return duration, [(t, t != first[0], to_jpeg(by_t[t])) for t in times]
 
 
 def fetch_image(url):
