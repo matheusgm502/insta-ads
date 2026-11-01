@@ -8,9 +8,9 @@ from app import db as appdb
 NOW = datetime(2026, 11, 1, tzinfo=timezone.utc)
 
 
-def make_post(caption="", speech=None):
+def make_post(caption="", speech=None, screen_text=None):
     return analysis.Post(id="x", date=NOW, kind="REELS", permalink="l", caption=caption,
-                         metrics={"reach": 1}, speech=speech)
+                         metrics={"reach": 1}, speech=speech, screen_text=screen_text)
 
 
 def codes(post):
@@ -97,3 +97,24 @@ def test_political_topics_are_flagged_but_everyday_words_are_not():
     assert "tema_politico" in codes(make_post("", "Hoje a conversa é sobre eleição e governo"))
     assert "tema_politico" in codes(make_post("A política não deveria entrar no consultório"))
     assert "tema_politico" not in codes(make_post("Escreva com a mão direita e vire à esquerda", "Um presente para você"))
+
+
+def test_text_that_only_appears_on_screen_is_also_triaged():
+    # um Reel sem fala: o conteúdo está no texto sobreposto, que a triagem precisa ler
+    assert "preco_ou_promocao" in codes(make_post("Legenda neutra", None, "Primeira sessão grátis para você"))
+    assert codes(make_post("Legenda neutra", None, "Respire fundo e recomece")) == set()
+
+
+def test_screen_text_is_loaded_from_described_frames(tmp_path):
+    import json
+    db = appdb.connect(tmp_path / "x.sqlite")
+    acc = appdb.ensure_account(db, "a")
+    ts = NOW.strftime("%Y-%m-%dT%H:%M:%S+0000")
+    db.execute("INSERT INTO media (id, account_id, media_type, media_product_type, timestamp) VALUES ('m', ?, 'VIDEO', 'REELS', ?)", (acc, ts))
+    db.execute("INSERT INTO media_insights VALUES ('m', '2026-11-01', 'reach', 10)")
+    for idx, text in enumerate(["Primeira frase", "Nenhum", "Segunda frase", "Primeira frase"]):
+        db.execute("INSERT INTO visual_frames (media_id, idx, description) VALUES ('m', ?, ?)",
+                   (idx, json.dumps({"texto_na_tela": text})))
+    db.commit(); db.close()
+    post = analysis.load_posts(tmp_path / "x.sqlite")[0]
+    assert post.screen_text == "Primeira frase Segunda frase"  # sem repetição e sem "Nenhum"

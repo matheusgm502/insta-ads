@@ -2,7 +2,7 @@
 """Candidatos a impulsionamento: os posts que melhor performaram no próprio perfil,
 com uma triagem automática de risco.
 
-A triagem procura, na legenda e na fala, sinais de quebra das regras de publicidade
+A triagem procura, na legenda, na fala e no texto sobreposto dos frames analisados (o início e cada corte), sinais de quebra das regras de publicidade
 profissional em saúde (preço ou promoção, promessa de resultado, depoimento,
 sensacionalismo), temas que a marca decidiu evitar e da política da Meta (afirmar ou sugerir que quem vê tem uma condição
 de saúde). É por palavra-chave: **ajuda a priorizar a revisão humana e não a substitui**.
@@ -45,7 +45,7 @@ RULES = [
 
 def triage(post):
     """Alertas encontrados na legenda e na fala do post: lista de {code, label, excerpt}."""
-    text = " ".join(t for t in (post.caption, post.speech) if t)
+    text = " ".join(t for t in (post.caption, post.speech, post.screen_text) if t)
     found = []
     for code, label, pattern in RULES:
         match = pattern.search(text)

@@ -53,6 +53,7 @@ class Post:
     n_cuts: int | None = None
     has_screen_text: bool | None = None
     speech: str | None = None
+    screen_text: str | None = None   # texto sobreposto lido nos frames analisados (início e cortes)
     ratios: dict = field(default_factory=dict)   # métrica -> valor / mediana do tipo
     outlier: bool = False
 
@@ -84,17 +85,20 @@ def load_posts(db_path=None):
             JOIN (SELECT media_id, MAX(collected_date) d FROM media_insights GROUP BY media_id) l
               ON l.media_id = i.media_id AND l.d = i.collected_date"""):
         latest.setdefault(media_id, {})[metric] = value
-    hooks, cuts, texts = {}, {}, {}
+    hooks, cuts, texts, screen_texts = {}, {}, {}, {}
     if _has_table(db, "transcripts"):
         hooks = {r[0]: (r[1], r[2], r[3]) for r in db.execute("SELECT media_id, hook, duration, text FROM transcripts")}
     if _has_table(db, "visual_status"):
         cuts = {r[0]: r[1] for r in db.execute("SELECT media_id, n_cuts FROM visual_status WHERE source = 'video'")}
         for media_id, desc in db.execute("SELECT media_id, description FROM visual_frames WHERE description IS NOT NULL"):
             try:
-                found = _has_text(json.loads(desc).get("texto_na_tela"))
+                value = json.loads(desc).get("texto_na_tela")
             except (ValueError, AttributeError):
                 continue
+            found = _has_text(value)
             texts[media_id] = texts.get(media_id, False) or found
+            if found and str(value).strip() not in screen_texts.setdefault(media_id, []):
+                screen_texts[media_id].append(str(value).strip())
     posts = []
     for mid, ptype, ts, link, cap in db.execute(
             "SELECT id, media_product_type, timestamp, permalink, caption FROM media WHERE account_id = ?",
@@ -107,7 +111,7 @@ def load_posts(db_path=None):
         posts.append(Post(
             id=mid, date=datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z").astimezone(TZ), kind=kind,
             permalink=link or "", caption=cap or "", metrics=metrics, hook=hook, duration=duration, speech=speech,
-            n_cuts=cuts.get(mid), has_screen_text=texts.get(mid)))
+            n_cuts=cuts.get(mid), has_screen_text=texts.get(mid), screen_text=" ".join(screen_texts.get(mid, [])) or None))
     db.close()
     return sorted(posts, key=lambda p: p.date)
 
