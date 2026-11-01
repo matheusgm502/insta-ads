@@ -4,7 +4,7 @@ com uma triagem automática de risco.
 
 A triagem procura, na legenda e na fala, sinais de quebra das regras de publicidade
 profissional em saúde (preço ou promoção, promessa de resultado, depoimento,
-sensacionalismo) e da política da Meta (afirmar ou sugerir que quem vê tem uma condição
+sensacionalismo), temas que a marca decidiu evitar e da política da Meta (afirmar ou sugerir que quem vê tem uma condição
 de saúde). É por palavra-chave: **ajuda a priorizar a revisão humana e não a substitui**.
 Ausência de alerta não significa que o conteúdo esteja de acordo.
 
@@ -36,6 +36,8 @@ RULES = [
      re.compile(r"\b(depoimentos?|meus pacientes|minha paciente|meu paciente|uma paciente|um paciente)\b", I)),
     ("sensacionalismo", "Regra do conselho: tom sensacionalista",
      re.compile(r"\b(chocante|urgente|ningu[ée]m te conta|segredo|n[ãa]o ignore|pare agora)\b", I)),
+    ("tema_politico", "Marca e Meta: tema político (a marca evita; anúncio político exige autorização na Meta)",
+     re.compile(r"\b(pol[ií]tic[oa]s?|governos?|presidente|elei[cç][aãõ][oe]s?|eleitor\w*|partido\w*|bolsonar\w*|lula|ditadura|golpe|senado)\b", I)),
     ("condicao_do_espectador", "Política da Meta: afirma ou sugere que quem vê tem uma condição de saúde",
      re.compile(rf"\bvoc[eê]\s+(tem|sofre|sente|est[aá]|vive|[ée])\b[^.?!]{{0,40}}\b({CONDITIONS})\b", I)),
 ]

@@ -91,3 +91,9 @@ def test_report_has_the_warning_and_lists_alerts(tmp_path):
     assert "não substitui" in text.lower() or "Não substitui" in text
     assert "## Alertas da triagem" in text and "preco_ou_promocao" in text
     assert "## Fora da curva" in text
+
+
+def test_political_topics_are_flagged_but_everyday_words_are_not():
+    assert "tema_politico" in codes(make_post("", "Hoje a conversa é sobre eleição e governo"))
+    assert "tema_politico" in codes(make_post("A política não deveria entrar no consultório"))
+    assert "tema_politico" not in codes(make_post("Escreva com a mão direita e vire à esquerda", "Um presente para você"))
