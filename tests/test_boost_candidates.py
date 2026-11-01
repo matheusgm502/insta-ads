@@ -118,3 +118,23 @@ def test_screen_text_is_loaded_from_described_frames(tmp_path):
     db.commit(); db.close()
     post = analysis.load_posts(tmp_path / "x.sqlite")[0]
     assert post.screen_text == "Primeira frase Segunda frase"  # sem repetição e sem "Nenhum"
+
+
+def test_reel_whose_video_file_the_api_withholds_is_flagged_as_protected_audio():
+    post = make_post("Legenda neutra")
+    post.audio_protected = True
+    assert codes(post) == {"audio_protegido"}
+
+
+def test_protected_audio_is_read_from_the_skipped_transcripts(tmp_path):
+    db = appdb.connect(tmp_path / "x.sqlite")
+    acc = appdb.ensure_account(db, "a")
+    ts = NOW.strftime("%Y-%m-%dT%H:%M:%S+0000")
+    for pid, ptype in (("protegido", "REELS"), ("livre", "REELS"), ("foto", "FEED")):
+        db.execute("INSERT INTO media (id, account_id, media_type, media_product_type, timestamp) VALUES (?, ?, 'VIDEO', ?, ?)", (pid, acc, ptype, ts))
+        db.execute("INSERT INTO media_insights VALUES (?, '2026-11-01', 'reach', 10)", (pid,))
+    db.execute("INSERT INTO transcript_skips (media_id, reason) VALUES ('protegido', 'sem media_url na API')")
+    db.execute("INSERT INTO transcript_skips (media_id, reason) VALUES ('foto', 'sem media_url na API')")
+    db.commit(); db.close()
+    flags = {p.id: p.audio_protected for p in analysis.load_posts(tmp_path / "x.sqlite")}
+    assert flags == {"protegido": True, "livre": False, "foto": False}   # só Reels contam

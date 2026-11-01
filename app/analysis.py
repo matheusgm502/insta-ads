@@ -54,6 +54,7 @@ class Post:
     has_screen_text: bool | None = None
     speech: str | None = None
     screen_text: str | None = None   # texto sobreposto lido nos frames analisados (início e cortes)
+    audio_protected: bool = False    # a API não entrega o arquivo de vídeo: provável áudio licenciado ou protegido
     ratios: dict = field(default_factory=dict)   # métrica -> valor / mediana do tipo
     outlier: bool = False
 
@@ -86,6 +87,9 @@ def load_posts(db_path=None):
               ON l.media_id = i.media_id AND l.d = i.collected_date"""):
         latest.setdefault(media_id, {})[metric] = value
     hooks, cuts, texts, screen_texts = {}, {}, {}, {}
+    skipped = set()
+    if _has_table(db, "transcript_skips"):
+        skipped = {r[0] for r in db.execute("SELECT media_id FROM transcript_skips")}
     if _has_table(db, "transcripts"):
         hooks = {r[0]: (r[1], r[2], r[3]) for r in db.execute("SELECT media_id, hook, duration, text FROM transcripts")}
     if _has_table(db, "visual_status"):
@@ -111,7 +115,8 @@ def load_posts(db_path=None):
         posts.append(Post(
             id=mid, date=datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z").astimezone(TZ), kind=kind,
             permalink=link or "", caption=cap or "", metrics=metrics, hook=hook, duration=duration, speech=speech,
-            n_cuts=cuts.get(mid), has_screen_text=texts.get(mid), screen_text=" ".join(screen_texts.get(mid, [])) or None))
+            n_cuts=cuts.get(mid), has_screen_text=texts.get(mid), screen_text=" ".join(screen_texts.get(mid, [])) or None,
+            audio_protected=(kind == "REELS" and mid in skipped)))
     db.close()
     return sorted(posts, key=lambda p: p.date)
 

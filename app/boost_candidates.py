@@ -52,6 +52,11 @@ def triage(post):
         if match:
             start, end = max(0, match.start() - 25), min(len(text), match.end() + 25)
             found.append({"code": code, "label": label, "excerpt": " ".join(text[start:end].split())})
+    if post.audio_protected:
+        found.append({"code": "audio_protegido",
+                      "label": "Meta: a API não entrega o vídeo quando há áudio licenciado ou protegido (inclui a biblioteca do "
+                               "Instagram); anúncio com esse áudio pode ser silenciado ou reprovado. Confira o nome da música no Reel",
+                      "excerpt": "arquivo de vídeo não fornecido pela API"})
     return found
 
 
