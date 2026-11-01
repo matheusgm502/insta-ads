@@ -270,11 +270,14 @@ def save_media_insights(db, client, m):
         for metric, value in insight_values(item):
             db.execute("INSERT OR REPLACE INTO media_insights VALUES (?, ?, ?, ?)",
                        (m["id"], today, metric, value))
+    if errors and not items:
+        log(db, "warn", f"mídia {m['id']} sem insights: {errors[0][1]}")
+        return
     for metric, err in errors:
         log(db, "warn", f"mídia {m['id']} {metric}: {err}")
 
 
-def collect_media(db, client):
+def collect_media(db, client, all_media=False):
     fields = ("id,caption,media_type,media_product_type,timestamp,permalink,"
               "like_count,comments_count")
     posts = client.paged("me/media", max_items=100, fields=fields, limit=50)
@@ -292,7 +295,7 @@ def collect_media(db, client):
              m.get("permalink"), m.get("caption"), m.get("like_count"),
              m.get("comments_count"), now_iso()))
         ts = datetime.strptime(m["timestamp"], "%Y-%m-%dT%H:%M:%S%z")
-        if ts >= cutoff or media_kind(m) == "STORY":
+        if all_media or ts >= cutoff or media_kind(m) == "STORY":
             save_media_insights(db, client, m)
             refreshed += 1
     log(db, "info", f"{len(posts)} posts, {len(stories)} stories; insights de {refreshed} mídias")
@@ -322,6 +325,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--check", action="store_true", help="só testa o token e mostra a conta")
     ap.add_argument("--demographics", action="store_true", help="força coleta de demografia")
+    ap.add_argument("--all-media", action="store_true",
+                    help=f"atualiza insights de todas as mídias, não só dos últimos {MEDIA_REFRESH_DAYS} dias")
     ap.add_argument("--refresh-token", action="store_true", help="força renovação do token")
     ap.add_argument("--days", type=int, default=REPROCESS_DAYS,
                     help=f"dias de insights da conta a (re)processar (padrão {REPROCESS_DAYS}, máx. ~30)")
@@ -344,7 +349,7 @@ def main():
         me = collect_account(db, client)
         ig_id = me.get("user_id") or me["id"]
         collect_account_insights(db, client, ig_id, days=args.days)
-        collect_media(db, client)
+        collect_media(db, client, all_media=args.all_media)
         if args.demographics or date.today().weekday() == 0:  # segunda-feira
             collect_demographics(db, client, ig_id)
         db.commit()
