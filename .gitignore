@@ -8,6 +8,7 @@
 
 # Dados coletados da conta
 data/
+reports/
 *.sqlite
 *.db
 *.csv
@@ -17,3 +18,4 @@ data/
 CLAUDE.local.md
 
 __pycache__/
+.venv/
