@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "unit": "USD por 1 milhão de tokens: [entrada, saída]",
+    "checked": "2026-11-01",
+    "sources": [
+      "https://developers.openai.com/api/docs/pricing",
+      "https://api-docs.deepseek.com/quick_start/pricing",
+      "https://docs.z.ai/guides/overview/pricing",
+      "Claude: tabela da skill claude-api (cache de 2026-10-06)"
+    ],
+    "notes": "Estimativa sem desconto de cache. DeepSeek: valores fora do pico (no pico, o dobro). Haiku 5.5: mais caro acima de 100K tokens."
+  },
+  "anthropic:claude-opus-5-5": [4.00, 20.00],
+  "anthropic:claude-sonnet-5-5": [2.00, 10.00],
+  "anthropic:claude-haiku-5-5": [0.10, 0.50],
+  "openai:gpt-6-astra": [10.00, 50.00],
+  "openai:gpt-6.1-sol": [2.00, 10.00],
+  "openai:gpt-6.1-terra": [1.00, 5.00],
+  "openai:gpt-6-luna": [0.10, 0.50],
+  "deepseek:deepseek-v4-pro": [0.66, 1.98],
+  "deepseek:deepseek-flash": [0.15, 0.60],
+  "zai:glm-5.3": [1.40, 4.40],
+  "zai:glm-5.3-flash": [0.15, 0.50]
+}
